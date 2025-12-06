@@ -1,403 +1,437 @@
--- LocalScript: FlyMenuLocalScript.lua
--- Coloque este LocalScript em StarterPlayerScripts (recomendado) ou dentro de StarterGui.
--- Cria um menu visual sofisticado com a categoria "Principal" e opções "Fly" e "Unfly".
--- "Fly" ativa voo controlado por teclado (WASD + Space + LeftControl, Shift para acelerar).
--- "Unfly" desativa o voo e restaura o estado normal do personagem.
+-- Script para 99 Noites no Roblox
+-- Autor: Assistente Roblox
+-- Coloque este script em um LocalScript dentro de um ScreenGui
 
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-
 local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
-local camera = workspace.CurrentCamera
+local mouse = player:GetMouse()
 
--- Configurações de voo
-local FLY_SPEED = 60         -- velocidade base
-local SPRINT_MULT = 2        -- multiplicador ao segurar Shift
-local VERTICAL_SPEED = 40    -- velocidade vertical (Space / LeftControl)
-local FORCE = 1e5            -- força máxima aplicada ao BodyVelocity/BodyGyro
+-- Configurações do jogo
+local GAME_SETTINGS = {
+    AXE_LEVELS = {
+        ["Madeira Comum"] = 1,
+        ["Big Tree"] = 3,
+        ["Árvore Gigante"] = 6
+    },
+    BONFIRE_MAX_LEVEL = 6,
+    RESOURCE_TYPES = {
+        WOOD = "Madeira",
+        IRON = "Ferro",
+        FOOD = "Comida"
+    }
+}
 
--- Estado
-local flying = false
-local char, hrp, humanoid
-local bv, bg -- BodyVelocity e BodyGyro
-
--- Controles de movimento
-local moveForward, moveBack, moveLeft, moveRight = false, false, false, false
-local ascend, descend, sprint = false, false, false
-
--- UI helper: cria elementos com mais facilidade
-local function make(class, props)
-	local obj = Instance.new(class)
-	if props then
-		for k, v in pairs(props) do
-			obj[k] = v
-		end
-	end
-	return obj
-end
-
--- Cria a UI sofisticada
+-- Função para criar a interface
 local function createUI()
-	-- ScreenGui
-	local screenGui = make("ScreenGui", {
-		Name = "FlyMenuGui",
-		ResetOnSpawn = false,
-		Parent = playerGui,
-		ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	})
-
-	-- Painel principal
-	local frame = make("Frame", {
-		Name = "MainFrame",
-		Size = UDim2.new(0, 380, 0, 160),
-		Position = UDim2.new(0.5, -190, 0.85, -80),
-		BackgroundColor3 = Color3.fromRGB(18, 18, 20),
-		BorderSizePixel = 0,
-		Parent = screenGui,
-		ClipsDescendants = true,
-	})
-	local corner = make("UICorner", {CornerRadius = UDim.new(0, 12), Parent = frame})
-	local stroke = make("UIStroke", {Color = Color3.fromRGB(70,70,80), Thickness = 1, Parent = frame})
-	local gradient = make("UIGradient", {
-		Color = ColorSequence.new{
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(30,30,36)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(20,20,24)),
-		},
-		Parent = frame
-	})
-
-	-- Título
-	local title = make("TextLabel", {
-		Name = "Title",
-		Size = UDim2.new(1, -24, 0, 34),
-		Position = UDim2.new(0, 12, 0, 10),
-		BackgroundTransparency = 1,
-		Text = "Menu Principal",
-		TextColor3 = Color3.fromRGB(240,240,240),
-		Font = Enum.Font.GothamSemibold,
-		TextSize = 20,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = frame
-	})
-	-- Subtítulo / descrição
-	local desc = make("TextLabel", {
-		Name = "Desc",
-		Size = UDim2.new(1, -24, 0, 18),
-		Position = UDim2.new(0, 12, 0, 40),
-		BackgroundTransparency = 1,
-		Text = "Categoria: Principal — Ferramentas do jogador",
-		TextColor3 = Color3.fromRGB(170,170,180),
-		Font = Enum.Font.Gotham,
-		TextSize = 12,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = frame
-	})
-
-	-- Container de botões
-	local buttonContainer = make("Frame", {
-		Name = "Buttons",
-		Size = UDim2.new(1, -24, 0, 84),
-		Position = UDim2.new(0, 12, 0, 64),
-		BackgroundTransparency = 1,
-		Parent = frame
-	})
-
-	local layout = make("UIListLayout", {
-		Parent = buttonContainer,
-		HorizontalAlignment = Enum.HorizontalAlignment.Left,
-		Padding = UDim.new(0, 10)
-	})
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-
-	-- Função para criar botão estilizado
-	local function createButton(text, description)
-		local btn = make("TextButton", {
-			Size = UDim2.new(0, 170, 0, 60),
-			BackgroundColor3 = Color3.fromRGB(28, 28, 32),
-			AutoButtonColor = false,
-			Text = "",
-			Parent = buttonContainer
-		})
-		local bcorner = make("UICorner", {CornerRadius = UDim.new(0, 10), Parent = btn})
-		local bstroke = make("UIStroke", {Color = Color3.fromRGB(60,60,70), Thickness = 1, Parent = btn})
-		local bgrad = make("UIGradient", {
-			Color = ColorSequence.new{
-				ColorSequenceKeypoint.new(0, Color3.fromRGB(38, 38, 44)),
-				ColorSequenceKeypoint.new(1, Color3.fromRGB(26, 26, 30)),
-			},
-			Parent = btn
-		})
-		-- Texto do botão
-		local t = make("TextLabel", {
-			Size = UDim2.new(1, -16, 0, 26),
-			Position = UDim2.new(0, 8, 0, 6),
-			BackgroundTransparency = 1,
-			Text = text,
-			TextColor3 = Color3.fromRGB(240,240,240),
-			Font = Enum.Font.GothamBold,
-			TextSize = 15,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Parent = btn
-		})
-		local s = make("TextLabel", {
-			Size = UDim2.new(1, -16, 0, 22),
-			Position = UDim2.new(0, 8, 0, 30),
-			BackgroundTransparency = 1,
-			Text = description or "",
-			TextColor3 = Color3.fromRGB(170,170,180),
-			Font = Enum.Font.Gotham,
-			TextSize = 12,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Parent = btn
-		})
-		-- hover effect
-		btn.MouseEnter:Connect(function()
-			TweenService:Create(btn, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(42,42,48)}):Play()
-		end)
-		btn.MouseLeave:Connect(function()
-			TweenService:Create(btn, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.fromRGB(28,28,32)}):Play()
-		end)
-		return btn
-	end
-
-	-- Botões Fly / Unfly
-	local btnFly = createButton("Fly", "Selecione para voar no jogo")
-	local btnUnfly = createButton("Unfly", "Selecione para parar de voar")
-	btnFly.LayoutOrder = 1
-	btnUnfly.LayoutOrder = 2
-
-	-- Pequena legenda de controles
-	local hint = make("TextLabel", {
-		Name = "Hint",
-		Size = UDim2.new(1, -24, 0, 16),
-		Position = UDim2.new(0, 12, 1, -22),
-		BackgroundTransparency = 1,
-		Text = "Controles: W/A/S/D = mover • Space = subir • LeftCtrl = descer • Shift = acelerar",
-		TextColor3 = Color3.fromRGB(150,150,160),
-		Font = Enum.Font.Gotham,
-		TextSize = 11,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = frame
-	})
-
-	-- Fechar/abrir com animação (opcional)
-	local toggleBtn = make("TextButton", {
-		Name = "Toggle",
-		Size = UDim2.new(0, 34, 0, 34),
-		Position = UDim2.new(1, -44, 0, 10),
-		BackgroundColor3 = Color3.fromRGB(40,40,46),
-		AutoButtonColor = true,
-		Text = "≡",
-		TextColor3 = Color3.fromRGB(230,230,230),
-		Font = Enum.Font.GothamBlack,
-		TextSize = 18,
-		Parent = frame
-	})
-	make("UICorner", {CornerRadius = UDim.new(0, 8), Parent = toggleBtn})
-
-	-- Dragging do painel
-	local dragging = false
-	local dragStart = Vector2.new()
-	local startPos = UDim2.new()
-	frame.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = true
-			dragStart = input.Position
-			startPos = frame.Position
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-				end
-			end)
-		end
-	end)
-	frame.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			if dragging then
-				local delta = input.Position - dragStart
-				frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-			end
-		end
-	end)
-
-	-- Expor botões
-	return {
-		ScreenGui = screenGui,
-		Frame = frame,
-		BtnFly = btnFly,
-		BtnUnfly = btnUnfly,
-		ToggleBtn = toggleBtn
-	}
+    -- Cria o ScreenGui
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "AutoFarmGUI"
+    screenGui.Parent = player.PlayerGui
+    
+    -- Frame principal
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 300, 0, 400)
+    mainFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = screenGui
+    
+    -- Título
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Text = "Auto Farm - 99 Noites"
+    title.Size = UDim2.new(1, 0, 0, 50)
+    title.Position = UDim2.new(0, 0, 0, 0)
+    title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 18
+    title.Parent = mainFrame
+    
+    -- Container dos botões
+    local buttonContainer = Instance.new("Frame")
+    buttonContainer.Name = "ButtonContainer"
+    buttonContainer.Size = UDim2.new(1, -20, 1, -70)
+    buttonContainer.Position = UDim2.new(0, 10, 0, 60)
+    buttonContainer.BackgroundTransparency = 1
+    buttonContainer.Parent = mainFrame
+    
+    -- Botão Madeira
+    local woodButton = Instance.new("TextButton")
+    woodButton.Name = "WoodButton"
+    woodButton.Text = "🌲 Madeira"
+    woodButton.Size = UDim2.new(1, 0, 0, 80)
+    woodButton.Position = UDim2.new(0, 0, 0, 0)
+    woodButton.BackgroundColor3 = Color3.fromRGB(101, 67, 33)
+    woodButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    woodButton.Font = Enum.Font.GothamBold
+    woodButton.TextSize = 16
+    woodButton.Parent = buttonContainer
+    
+    -- Descrição Madeira
+    local woodDesc = Instance.new("TextLabel")
+    woodDesc.Name = "WoodDesc"
+    woodDesc.Text = "Destrói madeiras, leva para fogueira (até nível 6) e o resto para máquina. Coleta baús para upgrade de machado."
+    woodDesc.Size = UDim2.new(1, -10, 0, 40)
+    woodDesc.Position = UDim2.new(0, 5, 0, 85)
+    woodDesc.BackgroundTransparency = 1
+    woodDesc.TextColor3 = Color3.fromRGB(200, 200, 200)
+    woodDesc.Font = Enum.Font.Gotham
+    woodDesc.TextSize = 12
+    woodDesc.TextWrapped = true
+    woodDesc.Parent = woodButton
+    
+    -- Botão Ferro
+    local ironButton = Instance.new("TextButton")
+    ironButton.Name = "IronButton"
+    ironButton.Text = "⚙️ Ferro"
+    ironButton.Size = UDim2.new(1, 0, 0, 60)
+    ironButton.Position = UDim2.new(0, 0, 0, 140)
+    ironButton.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+    ironButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    ironButton.Font = Enum.Font.GothamBold
+    ironButton.TextSize = 16
+    ironButton.Parent = buttonContainer
+    
+    -- Descrição Ferro
+    local ironDesc = Instance.new("TextLabel")
+    ironDesc.Name = "IronDesc"
+    ironDesc.Text = "Coleta todos os minérios de ferro do mapa e leva para a máquina."
+    ironDesc.Size = UDim2.new(1, -10, 0, 30)
+    ironDesc.Position = UDim2.new(0, 5, 0, 65)
+    ironDesc.BackgroundTransparency = 1
+    ironDesc.TextColor3 = Color3.fromRGB(200, 200, 200)
+    ironDesc.Font = Enum.Font.Gotham
+    ironDesc.TextSize = 12
+    ironDesc.TextWrapped = true
+    ironDesc.Parent = ironButton
+    
+    -- Botão Comida
+    local foodButton = Instance.new("TextButton")
+    foodButton.Name = "FoodButton"
+    foodButton.Text = "🍖 Comida"
+    foodButton.Size = UDim2.new(1, 0, 0, 60)
+    foodButton.Position = UDim2.new(0, 0, 0, 220)
+    foodButton.BackgroundColor3 = Color3.fromRGB(198, 56, 56)
+    foodButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    foodButton.Font = Enum.Font.GothamBold
+    foodButton.TextSize = 16
+    foodButton.Parent = buttonContainer
+    
+    -- Descrição Comida
+    local foodDesc = Instance.new("TextLabel")
+    foodDesc.Name = "FoodDesc"
+    foodDesc.Text = "Caça todos os animais do jogo e leva a carne para a fogueira."
+    foodDesc.Size = UDim2.new(1, -10, 0, 30)
+    foodDesc.Position = UDim2.new(0, 5, 0, 65)
+    foodDesc.BackgroundTransparency = 1
+    foodDesc.TextColor3 = Color3.fromRGB(200, 200, 200)
+    foodDesc.Font = Enum.Font.Gotham
+    foodDesc.TextSize = 12
+    foodDesc.TextWrapped = true
+    foodDesc.Parent = foodButton
+    
+    -- Status/Log
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Name = "StatusLabel"
+    statusLabel.Text = "Pronto para começar..."
+    statusLabel.Size = UDim2.new(1, -20, 0, 30)
+    statusLabel.Position = UDim2.new(0, 10, 1, -40)
+    statusLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextSize = 14
+    statusLabel.TextWrapped = true
+    statusLabel.Parent = mainFrame
+    
+    -- Botão Fechar
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.Text = "X"
+    closeButton.Size = UDim2.new(0, 30, 0, 30)
+    closeButton.Position = UDim2.new(1, -35, 0, 10)
+    closeButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.TextSize = 14
+    closeButton.Parent = mainFrame
+    
+    return screenGui, woodButton, ironButton, foodButton, statusLabel, closeButton
 end
 
--- Cria os componentes de voo quando necessário
-local function enableFlight()
-	if flying then return end
-	if not char or not hrp or not humanoid then return end
-
-	-- Criar BodyVelocity e BodyGyro
-	bv = Instance.new("BodyVelocity")
-	bv.Name = "Fly_BV"
-	bv.MaxForce = Vector3.new(FORCE, FORCE, FORCE)
-	bv.P = 1250
-	bv.Velocity = Vector3.new(0, 0, 0)
-	bv.Parent = hrp
-
-	bg = Instance.new("BodyGyro")
-	bg.Name = "Fly_BG"
-	bg.MaxTorque = Vector3.new(FORCE, FORCE, FORCE)
-	bg.P = 3000
-	bg.CFrame = hrp.CFrame
-	bg.Parent = hrp
-
-	-- Evita animações que atrapalham o voo
-	if humanoid then
-		pcall(function() humanoid.PlatformStand = true end)
-	end
-
-	flying = true
+-- Sistema de logs
+local function updateStatus(message, color)
+    if color == nil then
+        color = Color3.fromRGB(255, 255, 255)
+    end
+    print("[AutoFarm]: " .. message)
 end
 
--- Desliga o voo e limpa objetos
-local function disableFlight()
-	if not flying then return end
-	if bv and bv.Parent then bv:Destroy() end
-	if bg and bg.Parent then bg:Destroy() end
-	if humanoid then
-		pcall(function() humanoid.PlatformStand = false end)
-	end
-	bv, bg = nil, nil
-	flying = false
+-- Função para encontrar objetos no mapa (exemplo genérico)
+local function findObjects(objectType)
+    local foundObjects = {}
+    
+    -- Esta função precisa ser adaptada para o seu jogo específico
+    if objectType == GAME_SETTINGS.RESOURCE_TYPES.WOOD then
+        -- Procura por árvores/lenha
+        local workspaceObjects = workspace:GetChildren()
+        for _, obj in ipairs(workspaceObjects) do
+            if obj.Name:lower():find("tree") or obj.Name:lower():find("wood") or obj.Name:lower():find("madeira") then
+                table.insert(foundObjects, obj)
+            end
+        end
+    elseif objectType == GAME_SETTINGS.RESOURCE_TYPES.IRON then
+        -- Procura por minérios de ferro
+        local workspaceObjects = workspace:GetChildren()
+        for _, obj in ipairs(workspaceObjects) do
+            if obj.Name:lower():find("iron") or obj.Name:lower():find("ferro") or obj.Name:lower():find("ore") then
+                table.insert(foundObjects, obj)
+            end
+        end
+    elseif objectType == GAME_SETTINGS.RESOURCE_TYPES.FOOD then
+        -- Procura por animais
+        local workspaceObjects = workspace:GetChildren()
+        for _, obj in ipairs(workspaceObjects) do
+            if obj.Name:lower():find("animal") or obj.Name:lower():find("deer") or 
+               obj.Name:lower():find("rabbit") or obj.Name:lower():find("boar") or
+               obj.Name:lower():find("meat") or obj.Name:lower():find("comida") then
+                table.insert(foundObjects, obj)
+            end
+        end
+    end
+    
+    return foundObjects
 end
 
--- Resetar estado quando o personagem for trocado
-local function onCharacterAdded(c)
-	char = c
-	hrp = char:WaitForChild("HumanoidRootPart", 5)
-	humanoid = char:FindFirstChildOfClass("Humanoid")
-	-- Se morrer ou trocar, desliga o voo
-	if humanoid then
-		humanoid.Died:Connect(function() disableFlight() end)
-	end
-	-- Certifique-se de limpar caso já existam restos
-	disableFlight()
+-- Função para simular caminhar até um objeto
+local function walkToObject(object)
+    -- Simulação de movimento (implementação real depende do seu jogo)
+    updateStatus("Movendo até: " .. object.Name)
+    
+    -- Em um jogo real, você usaria o caminhar do personagem
+    -- player.Character:MoveTo(object.Position)
+    
+    return true
 end
 
--- Input handlers para controlar movimento
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-	if input.KeyCode == Enum.KeyCode.W then moveForward = true end
-	if input.KeyCode == Enum.KeyCode.S then moveBack = true end
-	if input.KeyCode == Enum.KeyCode.A then moveLeft = true end
-	if input.KeyCode == Enum.KeyCode.D then moveRight = true end
-	if input.KeyCode == Enum.KeyCode.Space then ascend = true end
-	if input.KeyCode == Enum.KeyCode.LeftControl then descend = true end
-	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then sprint = true end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-	if input.KeyCode == Enum.KeyCode.W then moveForward = false end
-	if input.KeyCode == Enum.KeyCode.S then moveBack = false end
-	if input.KeyCode == Enum.KeyCode.A then moveLeft = false end
-	if input.KeyCode == Enum.KeyCode.D then moveRight = false end
-	if input.KeyCode == Enum.KeyCode.Space then ascend = false end
-	if input.KeyCode == Enum.KeyCode.LeftControl then descend = false end
-	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then sprint = false end
-end)
-
--- Loop que atualiza a física do voo
-RunService.RenderStepped:Connect(function(dt)
-	if flying and hrp and bv and bg and camera then
-		-- Calcula direção baseada na câmera
-		local camCFrame = camera.CFrame
-		local hMove = 0
-		local vMove = 0
-		if moveForward then vMove = vMove + 1 end
-		if moveBack then vMove = vMove - 1 end
-		if moveRight then hMove = hMove + 1 end
-		if moveLeft then hMove = hMove - 1 end
-
-		local forwardVec = Vector3.new(camCFrame.LookVector.X, 0, camCFrame.LookVector.Z).Unit
-		local rightVec = camCFrame.RightVector
-
-		local horizontal = Vector3.new(0,0,0)
-		if hMove ~= 0 or vMove ~= 0 then
-			horizontal = (forwardVec * vMove + rightVec * hMove)
-			if horizontal.Magnitude > 0 then
-				horizontal = horizontal.Unit
-			end
-		end
-
-		-- velocidades
-		local currentSpeed = FLY_SPEED * (sprint and SPRINT_MULT or 1)
-		local horizVel = horizontal * currentSpeed
-		local vertVel = 0
-		if ascend then vertVel = vertVel + VERTICAL_SPEED end
-		if descend then vertVel = vertVel - VERTICAL_SPEED end
-
-		-- Aplica velocidade
-		local newVel = Vector3.new(horizVel.X, vertVel, horizVel.Z)
-		bv.Velocity = newVel
-
-		-- Mantém orientação estável apontando para onde a câmera olha horizontalmente
-		local lookDir = Vector3.new(camCFrame.LookVector.X, 0, camCFrame.LookVector.Z)
-		if lookDir.Magnitude > 0 then
-			local targetCFrame = CFrame.new(hrp.Position, hrp.Position + lookDir)
-			bg.CFrame = targetCFrame
-		end
-	end
-end)
-
--- Inicialização UI e eventos
-local ui = createUI()
-local btnFly = ui.BtnFly
-local btnUnfly = ui.BtnUnfly
-local toggle = ui.ToggleBtn
-
--- Conectar botões
-btnFly.MouseButton1Click:Connect(function()
-	if not char then onCharacterAdded(player.Character or player.CharacterAdded:Wait()) end
-	enableFlight()
-	-- feedback visual temporário
-	btnFly.Text = "Voando ✔"
-	TweenService:Create(btnFly, TweenInfo.new(0.18), {BackgroundColor3 = Color3.fromRGB(36,120,200)}):Play()
-	wait(0.7)
-	TweenService:Create(btnFly, TweenInfo.new(0.28), {BackgroundColor3 = Color3.fromRGB(28,28,32)}):Play()
-	btnFly.Text = ""
-end)
-
-btnUnfly.MouseButton1Click:Connect(function()
-	disableFlight()
-	btnUnfly.Text = "Parado ✔"
-	TweenService:Create(btnUnfly, TweenInfo.new(0.18), {BackgroundColor3 = Color3.fromRGB(200,60,60)}):Play()
-	wait(0.7)
-	TweenService:Create(btnUnfly, TweenInfo.new(0.28), {BackgroundColor3 = Color3.fromRGB(28,28,32)}):Play()
-	btnUnfly.Text = ""
-end)
-
--- Toggle de abrir/fechar painel com animação simples
-local open = true
-toggle.MouseButton1Click:Connect(function()
-	open = not open
-	local targetY = open and 160 or 36
-	TweenService:Create(ui.Frame, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {Size = UDim2.new(0, 380, 0, targetY)}):Play()
-end)
-
--- Conecta CharacterAdded
-if player.Character then
-	onCharacterAdded(player.Character)
+-- Função para coletar madeira
+local function collectWood()
+    updateStatus("Iniciando coleta de madeira...", Color3.fromRGB(101, 67, 33))
+    
+    -- Encontrar árvores
+    local trees = findObjects(GAME_SETTINGS.RESOURCE_TYPES.WOOD)
+    updateStatus("Encontradas " .. #trees .. " árvores/madeiras")
+    
+    -- Coletar baús primeiro (para melhorar machado)
+    updateStatus("Procurando baús para upgrade do machado...")
+    
+    -- Encontrar e coletar baús
+    local chests = {}
+    local workspaceObjects = workspace:GetChildren()
+    for _, obj in ipairs(workspaceObjects) do
+        if obj.Name:lower():find("chest") or obj.Name:lower():find("baú") or obj.Name:lower():find("bau") then
+            table.insert(chests, obj)
+        end
+    end
+    
+    if #chests > 0 then
+        updateStatus("Encontrados " .. #chests .. " baús. Coletando...")
+        for _, chest in ipairs(chests) do
+            walkToObject(chest)
+            -- Simular coleta do baú
+            updateStatus("Baú coletado! Machado melhorado.")
+            task.wait(1) -- Espera simulada
+        end
+    end
+    
+    -- Coletar árvores comuns
+    local bonfireWood = 0
+    local machineWood = 0
+    local bonfireLevel = 0
+    
+    for _, tree in ipairs(trees) do
+        -- Caminhar até a árvore
+        if walkToObject(tree) then
+            -- Verificar tipo de árvore
+            local isBigTree = tree.Name:lower():find("big") or tree.Name:lower():find("grande")
+            
+            if isBigTree then
+                updateStatus("Cortando Big Tree (machado melhorado necessário)...")
+            else
+                updateStatus("Cortando árvore comum...")
+            end
+            
+            -- Simular corte
+            task.wait(2)
+            
+            -- Decidir destino (fogueira ou máquina)
+            if bonfireLevel < GAME_SETTINGS.BONFIRE_MAX_LEVEL then
+                updateStatus("Levando madeira para fogueira...")
+                bonfireWood = bonfireWood + 1
+                bonfireLevel = math.floor(bonfireWood / 10) + 1 -- Simulação de nível
+            else
+                updateStatus("Fogueira no nível máximo! Levando para máquina...")
+                machineWood = machineWood + 1
+            end
+            
+            -- Simular entrega
+            task.wait(1)
+        end
+    end
+    
+    updateStatus("Concluído! Madeira na fogueira: " .. bonfireWood .. " | Na máquina: " .. machineWood)
+    updateStatus("Fogueira agora no nível: " .. math.min(bonfireLevel, GAME_SETTINGS.BONFIRE_MAX_LEVEL))
 end
-player.CharacterAdded:Connect(onCharacterAdded)
 
--- Limpeza segura se o jogador sair (garantir remoção)
-player:GetPropertyChangedSignal("Parent"):Connect(function()
-	if not player.Parent then
-		disableFlight()
-	end
-end)
+-- Função para coletar ferro
+local function collectIron()
+    updateStatus("Iniciando coleta de ferro...", Color3.fromRGB(128, 128, 128))
+    
+    -- Encontrar minérios de ferro
+    local ironOres = findObjects(GAME_SETTINGS.RESOURCE_TYPES.IRON)
+    updateStatus("Encontrados " .. #ironOres .. " minérios de ferro")
+    
+    local collectedIron = 0
+    
+    for _, ore in ipairs(ironOres) do
+        -- Caminhar até o minério
+        if walkToObject(ore) then
+            updateStatus("Minando ferro...")
+            
+            -- Simular mineração
+            task.wait(3)
+            
+            updateStatus("Levando ferro para máquina...")
+            collectedIron = collectedIron + 1
+            
+            -- Simular entrega na máquina
+            task.wait(1)
+        end
+    end
+    
+    updateStatus("Concluído! Ferro coletado: " .. collectedIron)
+end
 
--- Mensagem rápida no console para desenvolvedor
-print("[FlyMenuLocalScript] UI criada. Use Fly / Unfly no menu Principal. Controles: W/A/S/D, Space, LeftCtrl, Shift.")
+-- Função para coletar comida
+local function collectFood()
+    updateStatus("Iniciando caça por comida...", Color3.fromRGB(198, 56, 56))
+    
+    -- Encontrar animais
+    local animals = findObjects(GAME_SETTINGS.RESOURCE_TYPES.FOOD)
+    updateStatus("Encontrados " .. #animals .. " animais")
+    
+    local collectedFood = 0
+    
+    for _, animal in ipairs(animals) do
+        -- Caminhar até o animal
+        if walkToObject(animal) then
+            updateStatus("Caçando " .. animal.Name .. "...")
+            
+            -- Simular caça
+            task.wait(2)
+            
+            updateStatus("Levando carne para fogueira...")
+            collectedFood = collectedFood + 1
+            
+            -- Simular cozinhar na fogueira
+            task.wait(1)
+        end
+    end
+    
+    updateStatus("Concluído! Comida coletada: " .. collectedFood)
+end
+
+-- Função principal
+local function main()
+    -- Criar a interface
+    local screenGui, woodButton, ironButton, foodButton, statusLabel, closeButton = createUI()
+    
+    -- Atualizar função de status para usar o label
+    local originalUpdateStatus = updateStatus
+    updateStatus = function(message, color)
+        originalUpdateStatus(message, color)
+        if statusLabel then
+            statusLabel.Text = message
+            if color then
+                statusLabel.TextColor3 = color
+            end
+        end
+    end
+    
+    -- Configurar eventos dos botões
+    woodButton.MouseButton1Click:Connect(function()
+        updateStatus("Opção selecionada: 🌲 Madeira")
+        task.spawn(function()
+            collectWood()
+        end)
+    end)
+    
+    ironButton.MouseButton1Click:Connect(function()
+        updateStatus("Opção selecionada: ⚙️ Ferro")
+        task.spawn(function()
+            collectIron()
+        end)
+    end)
+    
+    foodButton.MouseButton1Click:Connect(function()
+        updateStatus("Opção selecionada: 🍖 Comida")
+        task.spawn(function()
+            collectFood()
+        end)
+    end)
+    
+    -- Configurar botão fechar
+    closeButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+        updateStatus("Interface fechada")
+    end)
+    
+    -- Tornar a janela arrastável
+    local mainFrame = screenGui:FindFirstChild("MainFrame")
+    if mainFrame then
+        local title = mainFrame:FindFirstChild("Title")
+        local dragging = false
+        local dragInput, dragStart, startPos
+        
+        local function update(input)
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+        
+        title.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                dragStart = input.Position
+                startPos = mainFrame.Position
+                
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        dragging = false
+                    end
+                end)
+            end
+        end)
+        
+        title.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseMovement then
+                dragInput = input
+            end
+        end)
+        
+        game:GetService("UserInputService").InputChanged:Connect(function(input)
+            if input == dragInput and dragging then
+                update(input)
+            end
+        end)
+    end
+    
+    updateStatus("Interface carregada! Selecione uma opção.")
+end
+
+-- Iniciar o script
+if player.PlayerGui:FindFirstChild("AutoFarmGUI") then
+    player.PlayerGui:FindFirstChild("AutoFarmGUI"):Destroy()
+end
+
+main()
